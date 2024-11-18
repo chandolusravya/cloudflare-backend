@@ -9,10 +9,80 @@
  * `Env` object can be regenerated with `npm run cf-typegen`.
  *
  * Learn more at https://developers.cloudflare.com/workers/
+ 
  */
 
-export default {
-	async fetch(request, env, ctx): Promise<Response> {
-		return new Response('Hello World!');
-	},
-} satisfies ExportedHandler<Env>;
+
+
+
+import OpenAI from "openai";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+
+type Bindings = {
+	OPEN_AI_KEY: string;
+	AI: Ai; // this is from wrangler.toml
+}
+
+//bindings-very impo in cloudflare- they essentially resemble env. variables that we have access to
+//they are called bindings not only because they have environment varisbles but its also these powerful AI bindings and other things
+const app = new Hono<{Bindings: Bindings}>();
+
+//cors
+app.use(
+	'/*', //this means to all of the roots inside the app
+	cors({
+		origin: '*', //to allow all requests from next.js app
+		allowHeaders: ['X-Custom-Header', 'Upgrade-Insecure-Requests','Content-Type'], //adding content type to the allowed headers to fix CORS
+		//we are going to make content type request to our backend.
+		allowMethods: ['POST', 'GET', 'OPTIONS', 'PUT'],
+		exposeHeaders: ['Content-Length', 'X-Kuma-Revision'],
+		maxAge: 600,
+		credentials: true,
+	})
+
+);
+app.get('/', (c) => {
+    return new Response('Worker is running!');
+});
+/** 
+app.post('/translateDocument', (c) => {
+    return new Response('Translate Document Route Working!');
+});
+*/
+
+
+
+
+//1st API endpoint:
+
+//cludflare translation. 
+   //c is context
+app.post('/translateDocument', async (c) =>{
+	//1. when we make a request from  our next.js app, we r gng to pass the document data and the target language.
+	//the document datat is going to be the blocknote info. from the editor.
+	const { documentData, targetLang } = await c.req.json();
+	
+	
+	//2. then we r gng to generate summary of the document.
+	const summaryResponse = await c.env.AI.run('@cf/facebook/bart-large-cnn',{
+		input_text: documentData,
+		max_length: 1000,
+	});
+
+	//3. translate the summary into another language
+	const response = await c.env.AI.run('@cf/meta/m2m100-1.2b',{
+		text: summaryResponse.summary,
+		source_lang: 'english',
+		target_lang: targetLang,
+	})
+
+    
+
+	return new Response(JSON.stringify(response));
+
+});
+
+
+
+export default app;
